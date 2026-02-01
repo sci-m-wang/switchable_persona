@@ -1,0 +1,27 @@
+[project]
+name = "switchable_persona"
+version = "0.1.0"
+description = "Environment for VLM experiments with vLLM."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu130"
+
+[project.optional-dependencies]
+vlm = [
+  "vllm",
+  "torch==2.9.1+cu130",
+  "transformers",
+  "accelerate",
+  "pillow",
+  "safetensors",
+  "huggingface-hub",
+  "torchvision==0.24.1+cu130",
+  "torchaudio==2.9.1+cu130",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
