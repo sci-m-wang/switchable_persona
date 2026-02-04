@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test single-post extraction with Qwen3-VL via vLLM."""
+"""Batch extraction for all weibo JSON files under a root directory."""
 
 from __future__ import annotations
 
@@ -9,61 +9,18 @@ import os
 import site
 import sys
 import tempfile
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Iterable, Optional
 from urllib.request import urlretrieve
 
 import ctypes
 from transformers import AutoProcessor
 from qwen_vl_utils import process_vision_info
 
+from vllm import LLM, SamplingParams
+from vllm.sampling_params import StructuredOutputsParams
 
 DEFAULT_MODEL = "~/models/Qwen/Qwen3-VL-8B-Thinking"
-
-
-SCHEMA_HINT = {
-    "post_id": "string",
-    "style": {
-        "catchphrases": ["string"],
-        "signature_patterns": ["string"],
-        "tone": ["e.g. formal", "casual", "celebratory", "persuasive"],
-        "emotion": "one of: joy|trust|fear|surprise|sadness|disgust|anger|anticipation",
-        "evidence": ["text span or visual cue"],
-        "confidence": 0.0,
-    },
-    "safety_rewrite": {
-        "terms": [{"term": "string", "replacement": "string"}],
-        "evidence": ["text span"],
-        "confidence": 0.0,
-    },
-    "stance": {
-        "targets": [
-            {
-                "target": "string",
-                "position": "support|oppose|neutral",
-                "evidence": ["text span or visual cue"],
-                "confidence": 0.0,
-            }
-        ],
-        "reasoning": [
-            {
-                "target": "string",
-                "opinion": "string",
-                "intent": "string",
-                "evidence": ["text span or visual cue"],
-                "confidence": 0.0,
-            }
-        ],
-    },
-    "topic": {
-        "trigger": "string",
-        "one_sentence_summary": "string",
-        "evidence": ["text span or visual cue"],
-        "confidence": 0.0,
-    },
-    "knowledge_facts": [
-        {"fact": "string", "evidence": ["text span"], "confidence": 0.0}
-    ],
-}
 
 SCHEMA_JSON = {
     "type": "object",
@@ -216,66 +173,6 @@ SCHEMA_JSON = {
 }
 
 
-def _download_media(urls: List[str], suffix: str) -> List[str]:
-    tmp_dir = tempfile.mkdtemp(prefix="vlm_media_")
-    local_paths: List[str] = []
-    for idx, url in enumerate(urls, start=1):
-        try:
-            out_path = os.path.join(tmp_dir, f"media_{idx:02d}{suffix}")
-            urlretrieve(url, out_path)
-            local_paths.append(out_path)
-        except Exception:
-            continue
-    return local_paths
-
-
-def _find_by_basename(root: str, basenames: List[str]) -> List[str]:
-    if not root or not os.path.isdir(root):
-        return []
-    found: List[str] = []
-    for base in basenames:
-        for dirpath, _, filenames in os.walk(root):
-            if base in filenames:
-                found.append(os.path.join(dirpath, base))
-                break
-    return found
-
-
-def _gather_media_paths(
-    image_path: Optional[str], video_path: Optional[str], max_images: int
-) -> tuple[list[str], list[str]]:
-    images: list[str] = []
-    videos: list[str] = []
-    if image_path:
-        images.append(image_path)
-    if video_path:
-        videos.append(video_path)
-    return images[:max_images], videos
-
-
-def _as_file_uri(path: str) -> str:
-    if path.startswith(("file://", "http://", "https://", "data:")):
-        return path
-    return f"file://{path}"
-
-
-def _select_post(weibo_json: str, post_id: Optional[str]) -> dict:
-    data = json.loads(open(weibo_json, "r", encoding="utf-8").read())
-    posts = data.get("weibo", [])
-    if not posts:
-        raise ValueError("No posts found in weibo JSON.")
-    if post_id:
-        for item in posts:
-            if item.get("id") == post_id:
-                return item
-        raise ValueError(f"Post id {post_id} not found.")
-    # Prefer a post with media
-    for item in posts:
-        if item.get("original_pictures") not in (None, "无") or item.get("video_url") not in (None, "无"):
-            return item
-    return posts[0]
-
-
 def build_user_text(text: str, post_id: str) -> str:
     return (
         "你是信息抽取器，服务于“基于三层人格架构构建虚拟角色”的长期任务。"
@@ -300,57 +197,45 @@ def build_user_text(text: str, post_id: str) -> str:
         "3) 证据字段必须为原文或视觉线索的最小片段。\n"
         "4) 不要把“发帖原因”误放入 knowledge_facts；它应归入 topic。\n"
         "5) knowledge_facts 里只保留“长期可复用的事实/实体”。\n\n"
-        "少样本对齐（仅用于统一任务理解，不是硬性规则）：\n"
-        "POST_ID: EXAMPLE1\n"
-        "TEXT: “比亚迪成为全球首家达成第500万辆新能源汽车下线的车企。这份成绩属于比亚迪，更属于中国汽车品牌。在一起，才是中国汽车。”\n"
-        "正确理解：\n"
-        "- topic = 因“第500万辆下线”而发帖（一次性事件）。\n"
-        "- knowledge_facts = “比亚迪”“中国汽车品牌/行业”等长期实体，不写“第500万辆下线”。\n"
-        "- stance targets 可包含“比亚迪”“中国汽车工业/品牌”。\n"
-        "- style.tone 应为 celebratory/promotional 等风格，不是“积极/消极”。\n"
-        "- emotion 可为 joy/trust（如无明确情绪则 none）。\n\n"
         f"POST_ID: {post_id}\n"
         f"TEXT: {text}\n\n"
         "输出 JSON schema（仅供参考，不要复述）：\n"
-        f"{json.dumps(SCHEMA_HINT, ensure_ascii=False)}\n"
+        f"{json.dumps(SCHEMA_JSON, ensure_ascii=False)}\n"
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Single-post extraction with Qwen3-VL")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model path")
-    parser.add_argument("--text", help="Post text (optional if --weibo-json is provided)")
-    parser.add_argument("--post-id", default=None, help="Post ID (used with --weibo-json)")
-    parser.add_argument("--weibo-json", help="Weibo JSON file from crawler")
-    parser.add_argument("--image", help="Image path (local)")
-    parser.add_argument("--video", help="Video path (local)")
-    parser.add_argument("--max-images", type=int, default=3, help="Max images to load/download")
-    parser.add_argument("--no-download-media", action="store_true", help="Skip downloading media URLs")
-    parser.add_argument("--media-root", help="Local media root (contains img/ and video/)")
-    parser.add_argument("--prefer-local-media", action="store_true", help="Prefer local media if found")
-    parser.add_argument("--output", help="Output JSON file path")
-    parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--max-tokens", type=int, default=1200)
-    parser.add_argument(
-        "--max-model-len",
-        type=int,
-        default=120000,
-        help="Override model max length to fit KV cache on the GPU.",
-    )
-    parser.add_argument(
-        "--gpu-memory-utilization",
-        type=float,
-        default=0.9,
-        help="KV cache memory utilization ratio (0-1).",
-    )
+def _download_media(urls: list[str], suffix: str) -> list[str]:
+    tmp_dir = tempfile.mkdtemp(prefix="vlm_media_")
+    local_paths: list[str] = []
+    for idx, url in enumerate(urls, start=1):
+        try:
+            out_path = os.path.join(tmp_dir, f"media_{idx:02d}{suffix}")
+            urlretrieve(url, out_path)
+            local_paths.append(out_path)
+        except Exception:
+            continue
+    return local_paths
 
-    args = parser.parse_args()
 
-    model_path = os.path.expanduser(args.model)
+def _find_by_basename(root: str, basenames: list[str]) -> list[str]:
+    if not root or not os.path.isdir(root):
+        return []
+    found: list[str] = []
+    for base in basenames:
+        for dirpath, _, filenames in os.walk(root):
+            if base in filenames:
+                found.append(os.path.join(dirpath, base))
+                break
+    return found
 
-    # Ensure CUDA runtime (libcudart.so.12) from the venv is discoverable
-    # before importing vLLM. Some systems only honor LD_PRELOAD at process start,
-    # so we may re-exec once after setting it.
+
+def _as_file_uri(path: str) -> str:
+    if path.startswith(("file://", "http://", "https://", "data:")):
+        return path
+    return f"file://{path}"
+
+
+def _ensure_cuda_runtime() -> None:
     cuda_lib_dirs = []
     cuda_runtime_lib = None
     for sp in site.getsitepackages():
@@ -374,75 +259,71 @@ def main() -> int:
         except OSError:
             pass
 
-    text = args.text
-    post_id = args.post_id or "post-001"
-    image_path = args.image
-    video_path = args.video
 
-    if args.weibo_json:
-        post = _select_post(args.weibo_json, args.post_id)
-        text = post.get("content", "")
-        post_id = post.get("id", post_id)
-        media_root = args.media_root
-        if not media_root:
-            media_root = os.path.join(os.path.dirname(args.weibo_json), "")
-        img_root = os.path.join(media_root, "img")
-        vid_root = os.path.join(media_root, "video")
+def _iter_weibo_jsons(root: str) -> Iterable[str]:
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            if name.endswith(".json"):
+                yield os.path.join(dirpath, name)
 
-        # Prefer embedded media mapping in JSON if present
-        media = post.get("media") or {}
-        if not image_path:
-            media_imgs = media.get("original_pictures") or []
-            if media_imgs:
-                image_path = media_imgs[0].get("path")
-        if not video_path:
-            media_vids = media.get("video") or []
-            if media_vids:
-                video_path = media_vids[0].get("path")
 
+def _select_media_paths(post: dict, media_root: str, max_images: int, allow_download: bool) -> tuple[list[str], list[str]]:
+    image_paths: list[str] = []
+    video_paths: list[str] = []
+
+    media = post.get("media") or {}
+    media_imgs = media.get("original_pictures") or []
+    if media_imgs:
+        for item in media_imgs[:max_images]:
+            path = item.get("path")
+            if path and os.path.isfile(path):
+                image_paths.append(path)
+    media_vids = media.get("video") or []
+    if media_vids:
+        for item in media_vids:
+            path = item.get("path")
+            if path and os.path.isfile(path):
+                video_paths.append(path)
+
+    if not image_paths:
         pics = post.get("original_pictures")
-        if pics and pics != "无" and not image_path:
+        if pics and pics != "无":
             urls = [u.strip() for u in pics.split(",") if u.strip()]
             bases = [os.path.basename(u) for u in urls]
-            local_imgs = _find_by_basename(img_root, bases)
-            if local_imgs and args.prefer_local_media:
-                image_path = local_imgs[0]
-            elif not args.no_download_media:
-                dl_imgs = _download_media(urls[: args.max_images], ".jpg")
-                if dl_imgs:
-                    image_path = dl_imgs[0]
+            local_imgs = _find_by_basename(os.path.join(media_root, "img"), bases)
+            image_paths = local_imgs[:max_images]
+            if not image_paths and allow_download:
+                image_paths = _download_media(urls[:max_images], ".jpg")
 
+    if not video_paths:
         vurl = post.get("video_url")
-        if vurl and vurl != "无" and not video_path:
+        if vurl and vurl != "无":
             base = os.path.basename(vurl)
-            local_vids = _find_by_basename(vid_root, [base])
-            if local_vids and args.prefer_local_media:
-                video_path = local_vids[0]
-            elif not args.no_download_media:
-                dl_vids = _download_media([vurl], ".mp4")
-                if dl_vids:
-                    video_path = dl_vids[0]
+            local_vids = _find_by_basename(os.path.join(media_root, "video"), [base])
+            video_paths = local_vids
+            if not video_paths and allow_download:
+                video_paths = _download_media([vurl], ".mp4")
 
-    if not text:
-        raise SystemExit("No text provided. Use --text or --weibo-json.")
+    return image_paths, video_paths
 
-    images, videos = _gather_media_paths(image_path, video_path, args.max_images)
 
-    from vllm import LLM, SamplingParams  # import after env is set
-    from vllm.sampling_params import StructuredOutputsParams
+def _extract_one(
+    llm: LLM,
+    processor: AutoProcessor,
+    sampling_params: SamplingParams,
+    post: dict,
+    media_root: str,
+    max_images: int,
+    allow_download: bool,
+    skip_videos: bool,
+    bad_videos: list[dict],
+) -> dict:
+    text = post.get("content", "")
+    post_id = post.get("id", "")
 
-    llm = LLM(
-        model=model_path,
-        trust_remote_code=True,
-        max_model_len=args.max_model_len,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-    )
-    sampling_params = SamplingParams(
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        structured_outputs=StructuredOutputsParams(json=SCHEMA_JSON),
-    )
-
+    images, videos = _select_media_paths(post, media_root, max_images, allow_download)
+    if skip_videos:
+        videos = []
     user_text = build_user_text(text, post_id)
 
     messages: list[dict] = [
@@ -457,19 +338,57 @@ def main() -> int:
                 + [{"type": "video", "video": _as_file_uri(path)} for path in videos]
                 + [{"type": "text", "text": user_text}]
             ),
-        }
+        },
     ]
 
-    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
     prompt = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
-    image_inputs, video_inputs, video_kwargs = process_vision_info(
-        messages,
-        image_patch_size=processor.image_processor.patch_size,
-        return_video_kwargs=True,
-        return_video_metadata=True,
-    )
+    try:
+        image_inputs, video_inputs, video_kwargs = process_vision_info(
+            messages,
+            image_patch_size=processor.image_processor.patch_size,
+            return_video_kwargs=True,
+            return_video_metadata=True,
+        )
+    except Exception as exc:
+        # If video decoding fails, retry with images only.
+        if videos:
+            for path in videos:
+                bad_videos.append(
+                    {
+                        "post_id": post_id,
+                        "video_path": path,
+                        "error": str(exc),
+                        "weibo_media_root": media_root,
+                    }
+                )
+            print(f"[warn] video decode failed for post {post_id}: {exc}", file=sys.stderr)
+            videos = []
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Return ONLY valid JSON. Do not include any extra text.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        [{"type": "image", "image": _as_file_uri(path)} for path in images]
+                        + [{"type": "text", "text": user_text}]
+                    ),
+                },
+            ]
+            prompt = processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+            )
+            image_inputs, video_inputs, video_kwargs = process_vision_info(
+                messages,
+                image_patch_size=processor.image_processor.patch_size,
+                return_video_kwargs=True,
+                return_video_metadata=True,
+            )
+        else:
+            raise
     mm_data: dict = {}
     if image_inputs is not None:
         mm_data["image"] = image_inputs
@@ -489,29 +408,118 @@ def main() -> int:
     if outputs and outputs[0].outputs:
         text_out = outputs[0].outputs[0].text.strip()
     if not text_out:
-        # Fall back to any available text pieces for debugging.
         pieces = []
         for out in outputs or []:
             for cand in out.outputs:
                 if cand.text:
                     pieces.append(cand.text)
         text_out = "".join(pieces).strip()
-
-    # Normalize to pretty JSON if possible.
     try:
         parsed = json.loads(text_out)
-        text_out = json.dumps(parsed, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
-        pass
+        parsed = {"_raw": text_out}
+    return {
+        "post_id": post_id,
+        "extraction": parsed,
+        "media_used": {"images": images, "videos": videos},
+    }
 
-    if args.output:
-        if not os.path.exists(args.output):
-            os.makedirs(os.path.dirname(args.output), exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(text_out)
-    else:
-        print(text_out)
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Batch extract all weibo posts under a root")
+    parser.add_argument("--weibo-root", required=True, help="Root dir that contains weibo JSON folders")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model path")
+    parser.add_argument("--output", default="processed_data/extractions.jsonl")
+    parser.add_argument("--output-dir", default="processed_data/extractions")
+    parser.add_argument("--max-images", type=int, default=3)
+    parser.add_argument("--allow-download-media", action="store_true")
+    parser.add_argument("--skip-videos", action="store_true", help="Skip video inputs if decoding is unstable")
+    parser.add_argument("--bad-video-log", default="processed_data/bad_videos.jsonl")
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--max-model-len", type=int, default=110000)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--temperature", type=float, default=0.2)
+    parser.add_argument("--max-tokens", type=int, default=1200)
+    args = parser.parse_args()
+
+    _ensure_cuda_runtime()
+
+    model_path = os.path.expanduser(args.model)
+    llm = LLM(
+        model=model_path,
+        trust_remote_code=True,
+        max_model_len=args.max_model_len,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+    )
+    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        structured_outputs=StructuredOutputsParams(json=SCHEMA_JSON),
+    )
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+
+    processed = set()
+    if args.resume:
+        if os.path.isfile(args.output):
+            with open(args.output, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                        processed.add(rec.get("post_id"))
+                    except json.JSONDecodeError:
+                        continue
+
+    total = 0
+    bad_videos: list[dict] = []
+    with open(args.output, "a", encoding="utf-8") as out:
+        for weibo_json in _iter_weibo_jsons(args.weibo_root):
+            data = json.loads(open(weibo_json, "r", encoding="utf-8").read())
+            posts = data.get("weibo", [])
+            media_root = os.path.dirname(weibo_json)
+            for post in posts:
+                post_id = post.get("id", "")
+                if not post_id:
+                    continue
+                if args.resume and post_id in processed:
+                    continue
+                record = _extract_one(
+                    llm,
+                    processor,
+                    sampling_params,
+                    post,
+                    media_root,
+                    args.max_images,
+                    args.allow_download_media,
+                    args.skip_videos,
+                    bad_videos,
+                )
+                meta = {
+                    "post_id": post_id,
+                    "weibo_json": weibo_json,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "model": model_path,
+                    "publish_time": post.get("publish_time"),
+                }
+                line = {"meta": meta, "input": post, "result": record}
+                out.write(json.dumps(line, ensure_ascii=False) + "\n")
+                with open(
+                    os.path.join(args.output_dir, f"{post_id}.json"),
+                    "w",
+                    encoding="utf-8",
+                ) as fp:
+                    json.dump(line, fp, ensure_ascii=False, indent=2)
+                total += 1
+                if args.limit and total >= args.limit:
+                    return 0
+    if bad_videos:
+        os.makedirs(os.path.dirname(args.bad_video_log), exist_ok=True)
+        with open(args.bad_video_log, "a", encoding="utf-8") as f:
+            for item in bad_videos:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
     return 0
 
 

@@ -15,12 +15,19 @@ vlm = [
   "numpy",
   "torch",
   "transformers",
+  "qwen-vl-utils",
   "accelerate",
   "pillow",
   "safetensors",
   "huggingface-hub",
   "torchvision",
   "torchaudio",
+]
+annotate = [
+  "fastapi",
+  "uvicorn",
+  "jinja2",
+  "python-multipart",
 ]
 
 [[tool.uv.index]]
