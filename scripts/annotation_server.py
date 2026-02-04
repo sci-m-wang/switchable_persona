@@ -48,6 +48,7 @@ def _ensure_data_files() -> None:
                     "users": [
                         {"username": "annotator1", "password": "changeme"},
                         {"username": "annotator2", "password": "changeme"},
+                        {"username": "annotator3", "password": "changeme"},
                     ]
                 },
                 ensure_ascii=False,
