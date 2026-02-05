@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 *.log
 
+# Local datasets / generated artifacts (do not commit)
+weibo/
+processed_data/
+docs/build/
+
+# Secrets
+**/annotator_secret.txt
+
