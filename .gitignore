@@ -21,3 +21,6 @@ web/.next/
 web/out/
 .vercel/
 
+# Generated during web build (copied from repo root questionnaires/)
+web/public/questionnaires/
+

@@ -19,6 +19,13 @@
 
 本前端默认不包含后端存储（避免免费平台数据库依赖），标注数据保存在浏览器 localStorage，并支持导出/导入 JSON。
 
+### 为什么不把完整微博/媒体数据直接提交到 GitHub？
+
+- GitHub 有单文件 100MB 限制，且把 `weibo/` 这类大目录直接进 Git 历史会导致 push 失败、仓库极其臃肿。
+- Git LFS 即使可用，Vercel 构建通常拿不到真实 LFS 内容（常见情况是只拿到 pointer），不适合作为部署数据源。
+
+推荐做法：代码仓库保持轻量；把完整数据放到外部存储（Releases/云盘/对象存储），标注页通过 URL 加载任务文件（JSON/JSONL）。
+
 This project hosts a Python 3.13 environment for future VLM work (vLLM + VL models).
 Note: vLLM officially documents Python 3.10–3.13, but 3.14 works with current wheels.
 

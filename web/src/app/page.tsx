@@ -99,7 +99,7 @@ function isQuestionnairesComplete(state: UserState, defs: QuestionnaireDef[]) {
 export default function Page() {
   const [tasks, setTasks] = useState<NormalizedTask[]>([]);
   const [state, setState] = useState<UserState>(defaultState);
-  const [datasetUrl, setDatasetUrl] = useState('');
+  const [datasetUrl, setDatasetUrl] = useState('/sample/extractions.jsonl');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [payloadText, setPayloadText] = useState('');
   const [payloadError, setPayloadError] = useState<string | null>(null);
@@ -355,9 +355,20 @@ export default function Page() {
                 placeholder="https://.../extractions.jsonl"
               />
               <div style={{ height: 10 }} />
-              <button className="primary" onClick={onLoadFromUrl} disabled={!datasetUrl.trim()}>
-                从 URL 加载
-              </button>
+              <div className="row">
+                <button className="primary" onClick={onLoadFromUrl} disabled={!datasetUrl.trim()}>
+                  从 URL 加载
+                </button>
+                <button
+                  onClick={() => {
+                    setDatasetUrl('/sample/extractions.jsonl');
+                    // Delay so state updates before fetch.
+                    setTimeout(() => void onLoadFromUrl(), 0);
+                  }}
+                >
+                  加载仓库内置样例
+                </button>
+              </div>
             </div>
             <div>
               <div className="muted">从本地文件加载</div>

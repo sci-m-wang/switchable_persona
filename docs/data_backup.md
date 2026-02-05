@@ -37,6 +37,13 @@ bash scripts/backup_data.sh weibo processed_data
    - 优点：和代码仓库绑定、下载方便
    - 缺点：单个资产有大小限制（所以脚本默认分卷）
 
+   标注页（Vercel）可以直接用 Release 资产的下载直链作为“从 URL 加载”的地址，例如：
+
+   `https://github.com/<owner>/<repo>/releases/download/<tag>/data.tar.zst.part-000`
+
+   但更推荐你在 Release 里同时上传一个“可直接被前端读取的任务文件”（例如 `extractions.jsonl` 或 `extractions.json`），
+   因为浏览器端不适合在线解包 `tar.zst`。
+
 2. **单独的私有数据仓库（可用 Git LFS）**
    - 优点：版本化、权限隔离
    - 缺点：要额外维护一个 repo；LFS 对大规模媒体也可能有配额压力
