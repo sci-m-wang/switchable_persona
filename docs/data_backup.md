@@ -44,6 +44,19 @@ bash scripts/backup_data.sh weibo processed_data
    但更推荐你在 Release 里同时上传一个“可直接被前端读取的任务文件”（例如 `extractions.jsonl` 或 `extractions.json`），
    因为浏览器端不适合在线解包 `tar.zst`。
 
+    另外，真实抽取结果里的 `result.media_used` 通常是本地路径（`/…/weibo/…` 或 `weibo/…`）。
+    如果你希望 Vercel 上也能看到媒体，需要把媒体上传到公开存储，然后把路径改写成 http(s) URL。
+    仓库提供了一个预处理脚本：
+
+    ```bash
+    python3 scripts/prepare_web_dataset.py \
+       --input processed_data/extractions.jsonl \
+       --output out/extractions.public.jsonl \
+       --media-base-url https://cdn.example.com/weibo
+    ```
+
+    或者在标注页里填写“Media Base URL / Local Weibo Prefix”让前端实时映射。
+
 2. **单独的私有数据仓库（可用 Git LFS）**
    - 优点：版本化、权限隔离
    - 缺点：要额外维护一个 repo；LFS 对大规模媒体也可能有配额压力
