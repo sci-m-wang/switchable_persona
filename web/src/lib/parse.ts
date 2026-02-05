@@ -1,9 +1,5 @@
 import type { ExtractionRecord, NormalizedTask } from '@/lib/types';
 
-function isHttpUrl(s: string): boolean {
-  return /^https?:\/\//i.test(s);
-}
-
 export function parseJsonOrJsonl(text: string): unknown {
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -45,13 +41,9 @@ export function normalizeTasks(raw: unknown): NormalizedTask[] {
 
     const extraction = rec.result?.extraction ?? rec.extraction ?? {};
 
-    const images = (rec.result?.media_used?.images ?? rec.images ?? []).filter(
-      (p) => typeof p === 'string' && isHttpUrl(p)
-    );
+    const images = (rec.result?.media_used?.images ?? rec.images ?? []).filter((p) => typeof p === 'string');
 
-    const videos = (rec.result?.media_used?.videos ?? rec.videos ?? []).filter(
-      (p) => typeof p === 'string' && isHttpUrl(p)
-    );
+    const videos = (rec.result?.media_used?.videos ?? rec.videos ?? []).filter((p) => typeof p === 'string');
 
     if (!postId) continue;
 

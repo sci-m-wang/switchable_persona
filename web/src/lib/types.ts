@@ -16,6 +16,11 @@ export type NormalizedTask = {
   media: MediaUsed;
 };
 
+export type MediaResolveConfig = {
+  mediaBaseUrl?: string;
+  localWeiboPrefix?: string;
+};
+
 export type AnnotationEntry = {
   correct?: boolean;
   payload: unknown;
@@ -32,6 +37,7 @@ export type UserState = {
   questionnaires: Record<string, Record<string, string>>;
   progressIndex: number;
   annotations: Record<string, AnnotationEntry>;
+  mediaConfig?: MediaResolveConfig;
   datasetInfo?: {
     source?: string;
     loadedAt: number;

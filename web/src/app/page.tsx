@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnnotationEntry, NormalizedTask, UserState } from '@/lib/types';
+import type { AnnotationEntry, MediaResolveConfig, NormalizedTask, UserState } from '@/lib/types';
 import { clearState, downloadJson, loadState, saveState } from '@/lib/storage';
 import { normalizeTasks, parseJsonOrJsonl } from '@/lib/parse';
+import { resolveMediaUrl } from '@/lib/media';
 
 type QuestionnaireDef = {
   key: string;
@@ -24,7 +25,8 @@ function defaultState(): UserState {
     consent: { agreed: false, signedName: '' },
     questionnaires: {},
     progressIndex: 0,
-    annotations: {}
+    annotations: {},
+    mediaConfig: { mediaBaseUrl: '', localWeiboPrefix: '' }
   };
 }
 
@@ -130,6 +132,17 @@ export default function Page() {
   const total = tasks.length;
   const idx = clamp(state.progressIndex || 0, 0, Math.max(0, total - 1));
   const current = tasks[idx];
+
+  const mediaCfg: MediaResolveConfig = state.mediaConfig || { mediaBaseUrl: '', localWeiboPrefix: '' };
+  const resolvedMedia = useMemo(() => {
+    const images = (current?.media.images || [])
+      .map((p) => resolveMediaUrl(p, mediaCfg))
+      .filter((u): u is string => Boolean(u));
+    const videos = (current?.media.videos || [])
+      .map((p) => resolveMediaUrl(p, mediaCfg))
+      .filter((u): u is string => Boolean(u));
+    return { images, videos };
+  }, [current?.postId, mediaCfg.mediaBaseUrl, mediaCfg.localWeiboPrefix]);
 
   // Keep payloadText in sync with current task + saved annotations.
   useEffect(() => {
@@ -386,6 +399,48 @@ export default function Page() {
             </div>
           </div>
           {loadError ? <div className="error" style={{ marginTop: 10 }}>加载失败：{loadError}</div> : null}
+
+          <hr />
+          <div className="muted" style={{ fontWeight: 700 }}>媒体映射（可选）</div>
+          <div className="muted">
+            真实数据里的 media_used 往往是本地路径（如 /.../weibo/... 或 weibo/...）。
+            Vercel 无法访问本地文件：需要把媒体上传到公开存储（CDN/对象存储），然后在这里把路径映射成 http(s) URL。
+          </div>
+          <div style={{ height: 10 }} />
+          <div className="grid2">
+            <div>
+              <div className="muted">Media Base URL（你的媒体托管地址）</div>
+              <input
+                type="url"
+                value={mediaCfg.mediaBaseUrl || ''}
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    mediaConfig: { ...(s.mediaConfig || {}), mediaBaseUrl: e.target.value }
+                  }))
+                }
+                placeholder="https://cdn.example.com/weibo"
+              />
+            </div>
+            <div>
+              <div className="muted">Local Weibo Prefix（可选：用于剥离绝对路径前缀）</div>
+              <input
+                type="text"
+                value={mediaCfg.localWeiboPrefix || ''}
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    mediaConfig: { ...(s.mediaConfig || {}), localWeiboPrefix: e.target.value }
+                  }))
+                }
+                placeholder="/abs/path/to/weibo"
+              />
+            </div>
+          </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            小贴士：如果路径本身就是 weibo/xxx（相对路径），可以不填 Local Weibo Prefix。
+            或者用脚本预处理 JSONL：`python3 scripts/prepare_web_dataset.py --input processed_data/extractions.jsonl --output out/extractions.public.jsonl --media-base-url https://.../weibo`。
+          </div>
         </div>
 
         <div style={{ height: 12 }} />
@@ -507,13 +562,13 @@ export default function Page() {
 
               {(current.media.images?.length || current.media.videos?.length) ? (
                 <>
-                  <div className="muted">媒体（仅展示 http(s) 链接；本地路径不会上传到 Vercel）</div>
+                  <div className="muted">媒体（通过上面的“媒体映射”解析为 http(s)；本地路径不会上传到 Vercel）</div>
                   <div className="row">
-                    {(current.media.images || []).map((u) => (
+                    {resolvedMedia.images.map((u) => (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img key={u} src={u} alt="image" style={{ maxWidth: 160, borderRadius: 12, border: '1px solid var(--border)' }} />
                     ))}
-                    {(current.media.videos || []).map((u) => (
+                    {resolvedMedia.videos.map((u) => (
                       <video key={u} src={u} controls style={{ maxWidth: 240, borderRadius: 12, border: '1px solid var(--border)' }} />
                     ))}
                   </div>

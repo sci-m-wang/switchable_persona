@@ -26,6 +26,14 @@
 
 推荐做法：代码仓库保持轻量；把完整数据放到外部存储（Releases/云盘/对象存储），标注页通过 URL 加载任务文件（JSON/JSONL）。
 
+### 真实数据 + 媒体如何在 Vercel 上显示？
+
+抽取结果里的 `result.media_used` 往往是本地路径（例如 `/.../weibo/...` 或 `weibo/...`）。Vercel 访问不到本地文件，需要：
+
+- 把 `weibo/` 里的媒体上传到公开存储（CDN/对象存储）
+- 用脚本把路径改写成 URL：`python3 scripts/prepare_web_dataset.py --input processed_data/extractions.jsonl --output out/extractions.public.jsonl --media-base-url https://cdn.example.com/weibo`
+- 或者在标注页里填写“Media Base URL / Local Weibo Prefix”让前端实时映射
+
 This project hosts a Python 3.13 environment for future VLM work (vLLM + VL models).
 Note: vLLM officially documents Python 3.10–3.13, but 3.14 works with current wheels.
 
