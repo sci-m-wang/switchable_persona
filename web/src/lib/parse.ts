@@ -39,6 +39,13 @@ export function normalizeTasks(raw: unknown): NormalizedTask[] {
 
     const content = rec.input?.content || rec.content || '';
 
+    const sourceUrl =
+      (typeof rec.input?.article_url === 'string' ? rec.input?.article_url : '') ||
+      (typeof rec.input?.articleUrl === 'string' ? rec.input?.articleUrl : '') ||
+      (typeof (rec as any).article_url === 'string' ? (rec as any).article_url : '') ||
+      (typeof (rec as any).articleUrl === 'string' ? (rec as any).articleUrl : '') ||
+      undefined;
+
     const extraction = rec.result?.extraction ?? rec.extraction ?? {};
 
     const images = (rec.result?.media_used?.images ?? rec.images ?? []).filter((p) => typeof p === 'string');
@@ -50,6 +57,7 @@ export function normalizeTasks(raw: unknown): NormalizedTask[] {
     tasks.push({
       postId,
       content,
+      sourceUrl,
       extraction,
       media: { images, videos }
     });

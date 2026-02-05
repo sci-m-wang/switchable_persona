@@ -556,6 +556,16 @@ export default function Page() {
               <div className="muted">Post ID</div>
               <div style={{ fontWeight: 700, wordBreak: 'break-all' }}>{current.postId}</div>
 
+              {current.sourceUrl ? (
+                <>
+                  <div style={{ height: 8 }} />
+                  <div className="muted">原文链接</div>
+                  <a href={current.sourceUrl} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>
+                    {current.sourceUrl}
+                  </a>
+                </>
+              ) : null}
+
               <div style={{ height: 10 }} />
               <div className="muted">内容</div>
               <pre className="card" style={{ whiteSpace: 'pre-wrap' }}>{current.content || '(empty)'}</pre>

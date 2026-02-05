@@ -5,13 +5,20 @@ export type MediaUsed = {
 
 export type ExtractionRecord = {
   meta?: { post_id?: string };
-  input?: { content?: string };
+  input?: {
+    content?: string;
+    article_url?: string;
+    articleUrl?: string;
+    video_url?: string;
+    videoUrl?: string;
+  };
   result?: { extraction?: unknown; media_used?: MediaUsed };
 };
 
 export type NormalizedTask = {
   postId: string;
   content: string;
+  sourceUrl?: string;
   extraction: unknown;
   media: MediaUsed;
 };
