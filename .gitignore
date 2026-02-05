@@ -12,3 +12,12 @@ docs/build/
 # Secrets
 **/annotator_secret.txt
 
+# Backups (keep out of git)
+backups/
+
+# Vercel / Next.js
+web/node_modules/
+web/.next/
+web/out/
+.vercel/
+

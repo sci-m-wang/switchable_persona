@@ -1,5 +1,24 @@
 # switchable_persona
 
+## 数据备份（大数据不进 Git）
+
+- 推荐阅读： [docs/data_backup.md](docs/data_backup.md)
+- 一键打包：`bash scripts/backup_data.sh weibo processed_data`
+- 一键恢复：`bash scripts/restore_data.sh backups/<timestamp>`
+
+这套方案用于把爬取/分析数据从代码仓库剥离出来：代码照常同步 GitHub，但数据用归档分卷备份到外部存储（GitHub Releases/私有数据仓库/云盘）。
+
+## 标注页面（Vercel 免费版部署）
+
+仓库新增了一个 Next.js 前端（纯浏览器保存 + 导出 JSON），适配 Vercel 的主流模板部署方式：
+
+- 前端目录：`web/`
+- Vercel 上创建项目时，把 **Root Directory** 设置为 `web`
+- 构建命令：`npm run build`
+- 输出：Next.js 默认（Vercel 可自动识别）
+
+本前端默认不包含后端存储（避免免费平台数据库依赖），标注数据保存在浏览器 localStorage，并支持导出/导入 JSON。
+
 This project hosts a Python 3.13 environment for future VLM work (vLLM + VL models).
 Note: vLLM officially documents Python 3.10–3.13, but 3.14 works with current wheels.
 
