@@ -63,6 +63,8 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
   GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 fi
 
+INCLUDES_JSON="$(printf '%s\n' "${INCLUDES[@]}" | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin]))')"
+
 python3 - <<PY
 import json, os, pathlib, time
 out_dir = pathlib.Path(${OUT_DIR@Q})
@@ -71,7 +73,7 @@ parts = sorted(out_dir.glob('data.tar.zst.part-*'))
 manifest = {
   'created_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
   'git_commit': ${GIT_COMMIT@Q},
-  'included_paths': ${INCLUDES[@]@Q},
+  'included_paths': json.loads(${INCLUDES_JSON@Q}),
   'archive': {'name': archive.name, 'size_bytes': archive.stat().st_size if archive.exists() else None},
   'parts': [{'name': p.name, 'size_bytes': p.stat().st_size} for p in parts],
   'notes': 'Upload parts + SHA256SUMS + manifest.json to external storage (e.g., GitHub Release assets).'

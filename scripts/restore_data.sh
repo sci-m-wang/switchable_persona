@@ -20,20 +20,45 @@ if [[ ! -d "$BACKUP_DIR" ]]; then
 fi
 
 ARCHIVE="$BACKUP_DIR/data.tar.zst"
+MANIFEST="$BACKUP_DIR/manifest.json"
 
 if [[ ! -f "$BACKUP_DIR/SHA256SUMS" ]]; then
   echo "Missing SHA256SUMS in $BACKUP_DIR" >&2
   exit 1
 fi
 
-if [[ ! -f "$ARCHIVE" ]]; then
-  echo "[info] Rebuilding archive from parts..."
-  if ls "$BACKUP_DIR"/data.tar.zst.part-* >/dev/null 2>&1; then
-    cat "$BACKUP_DIR"/data.tar.zst.part-* > "$ARCHIVE"
-  else
-    echo "No archive and no parts found in $BACKUP_DIR" >&2
-    exit 1
+# If parts exist, try to rebuild archive from parts (handles truncated archive case).
+if ls "$BACKUP_DIR"/data.tar.zst.part-* >/dev/null 2>&1; then
+  # Validate part sizes against manifest before rebuilding.
+  if [[ -f "$MANIFEST" ]] && command -v python3 >/dev/null 2>&1; then
+    echo "[info] Validating part sizes against manifest..."
+    if ! python3 -c "
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+backup_dir = pathlib.Path(sys.argv[2])
+ok = True
+for p in manifest.get('parts', []):
+    f = backup_dir / p['name']
+    if not f.exists():
+        print(f\"[error] Missing part: {p['name']}\", file=sys.stderr)
+        ok = False
+    elif f.stat().st_size != p['size_bytes']:
+        print(f\"[error] Size mismatch for {p['name']}: expected {p['size_bytes']} bytes, got {f.stat().st_size} bytes\", file=sys.stderr)
+        ok = False
+if not ok:
+    sys.exit(1)
+print('[info] Part sizes match manifest.')
+" "$MANIFEST" "$BACKUP_DIR"; then
+      echo "[error] Backup data is corrupted or incomplete. Re-download the backup files." >&2
+      exit 1
+    fi
   fi
+
+  echo "[info] Rebuilding archive from parts..."
+  cat "$BACKUP_DIR"/data.tar.zst.part-* > "$ARCHIVE"
+elif [[ ! -f "$ARCHIVE" ]]; then
+  echo "No archive and no parts found in $BACKUP_DIR" >&2
+  exit 1
 fi
 
 echo "[info] Verifying checksums..."
